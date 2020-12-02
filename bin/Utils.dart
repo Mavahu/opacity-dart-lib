@@ -3,7 +3,7 @@ import 'dart:convert';
 
 import 'package:bip32/bip32.dart' as bip32;
 import 'package:convert/convert.dart' as convert;
-import 'package:cryptography/cryptography.dart' as cryptography;
+import 'package:pointycastle/digests/keccak.dart';
 import 'package:pointycastle/export.dart';
 
 bip32.BIP32 getFolderHDKey(bip32.BIP32 key, String folder) {
@@ -12,9 +12,9 @@ bip32.BIP32 getFolderHDKey(bip32.BIP32 key, String folder) {
 
 bip32.BIP32 generateSubHDKey(bip32.BIP32 key, String path) {
   // old way using ethereum_util lib
-  // final String hashedPath = convert.hex.encode(eth.keccak256(path));
+  // - final String hashedPath = convert.hex.encode(eth.keccak256(path));
   final String hashedPath =
-      convert.hex.encode(Digest('SHA-3/256').process(utf8.encode(path)));
+      convert.hex.encode(KeccakDigest(256).process(utf8.encode(path)));
   final String bipPath = hashToPath(hashedPath);
 
   final bip32.BIP32 derivedKey = key.derivePath(bipPath);
@@ -29,8 +29,8 @@ String hashToPath(String hash) {
   return result.substring(0, result.length - 1);
 }
 
-dynamic generateHashedFolderKey(bip32.BIP32 folderKey) {
-  final keccak256AsHex = convert.hex.encode(Digest('SHA-3/256')
+String generateHashedFolderKey(bip32.BIP32 folderKey) {
+  final String keccak256AsHex = convert.hex.encode(KeccakDigest(256)
       .process(utf8.encode(convert.hex.encode(folderKey.publicKey))));
   return keccak256AsHex;
   /*
@@ -41,7 +41,7 @@ dynamic generateHashedFolderKey(bip32.BIP32 folderKey) {
 }
 
 String generateFolderKeyString(bip32.BIP32 folderKey) {
-  final keccak256AsHex = convert.hex.encode(Digest('SHA-3/256')
+  final String keccak256AsHex = convert.hex.encode(KeccakDigest(256)
       .process(utf8.encode(convert.hex.encode(folderKey.privateKey))));
   return keccak256AsHex;
 
@@ -57,10 +57,10 @@ void decrypt(Uint8List encryptedData, String keyString) async {
 
   final Uint8List key = Uint8List.fromList(convert.hex.decode(keyString));
 
-  const cipher = cryptography.aesGcm;
-
-  final decrypted = await cipher.decryptSync(rawData,
-      secretKey: cryptography.SecretKey(key), nonce: cryptography.Nonce(iv));
+  final params = AEADParameters(KeyParameter(key), 16 * 8, iv, Uint8List(0));
+  throw ('Not functioanl');
+  final decrypter = GCMBlockCipher(AESFastEngine())..init(false, params);
+  final decrypted = decrypter.process(rawData);
 
   print(decrypted);
 }

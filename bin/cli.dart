@@ -4,8 +4,11 @@ import 'dart:typed_data';
 //import 'package:ethereum_util/ethereum_util.dart' as eth;
 import 'package:bip32/bip32.dart' as bip32;
 import 'package:convert/convert.dart' as convert;
+import 'package:cryptography/cryptography.dart';
 import 'package:http/http.dart' as http;
-import 'package:cryptography/cryptography.dart' as cryptography;
+import 'package:pointycastle/digests/keccak.dart';
+import 'package:pointycastle/export.dart';
+import 'package:pointycastle/src/utils.dart';
 
 import 'Utils.dart' as Utils;
 
@@ -26,20 +29,42 @@ class OpacityAccount {
   }
 
   Map signPayload(String payload) {
-    /*final String payloadHash = convert.hex.encode(eth.keccak256(payload));
-    final eth.ECDSASignature signatureObject = eth.sign(
-        Uint8List.fromList(convert.hex.decode(payloadHash)),
-        masterKey.privateKey);
-    // r + s => signature
+    // final String payloadHash = convert.hex.encode(eth.keccak256(payload));
+    // final eth.ECDSASignature signatureObject = eth.sign(
+    //     Uint8List.fromList(convert.hex.decode(payloadHash)),
+    //     masterKey.privateKey);
+    // // r + s => signature
+    // final String signature = signatureObject.r.toRadixString(16) +
+    //     signatureObject.s.toRadixString(16);
+    // return {
+    //   'requestBody': payload,
+    //   'signature': signature,
+    //   'publicKey': convert.hex.encode(masterKey.publicKey),
+    //   'hash': payloadHash
+    // };
+    final String payloadHash =
+        convert.hex.encode(KeccakDigest(256).process(utf8.encode(payload)));
+
+    // https://pub.dev/documentation/ethereum_util/latest/ethereum_util/sign.html
+    final ECDSASigner signer = ECDSASigner(null, HMac(SHA256Digest(), 64));
+    final NormalizedECDSASigner signer2 =
+        NormalizedECDSASigner(signer, enforceNormalized: true);
+    final ECPrivateKey key = ECPrivateKey(
+        decodeBigInt(masterKey.privateKey), ECDomainParameters('secp256k1'));
+    signer2.init(true, PrivateKeyParameter(key));
+    final ECSignature signatureObject =
+        signer2.generateSignature(convert.hex.decode(payloadHash));
+
+    // // r + s => signature
     final String signature = signatureObject.r.toRadixString(16) +
         signatureObject.s.toRadixString(16);
+
     return {
       'requestBody': payload,
       'signature': signature,
       'publicKey': convert.hex.encode(masterKey.publicKey),
       'hash': payloadHash
-    };*/
-    return {};
+    };
   }
 
   dynamic getFolderMetadata(String folder) async {
@@ -62,6 +87,7 @@ class OpacityAccount {
       String hashedFolderKey, String keyString) async {
     final Map rawPayload = {
       'timestamp': DateTime.now().millisecondsSinceEpoch,
+      // 'timestamp': 0,
       'metadataKey': hashedFolderKey
     };
     final String rawPayloadJson = JsonEncoder().convert(rawPayload);
