@@ -1,10 +1,8 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-//import 'package:ethereum_util/ethereum_util.dart' as eth;
 import 'package:bip32/bip32.dart' as bip32;
 import 'package:convert/convert.dart' as convert;
-import 'package:cryptography/cryptography.dart';
 import 'package:http/http.dart' as http;
 import 'package:pointycastle/digests/keccak.dart';
 import 'package:pointycastle/export.dart';
@@ -18,6 +16,7 @@ class OpacityAccount {
   String privateKey;
   String chainCode;
   bip32.BIP32 masterKey;
+  int timestamp = 1607012726974;
 
   OpacityAccount(String handle) {
     this.handle = handle;
@@ -56,8 +55,12 @@ class OpacityAccount {
         signer2.generateSignature(convert.hex.decode(payloadHash));
 
     // // r + s => signature
-    final String signature = signatureObject.r.toRadixString(16) +
-        signatureObject.s.toRadixString(16);
+    final String signature =
+        convert.hex.encode(encodeBigInt(signatureObject.r, 32)) +
+            convert.hex.encode(encodeBigInt(signatureObject.s, 32));
+    if (signature.length != 128) {
+      throw ('Signature has an invalid length');
+    }
 
     return {
       'requestBody': payload,
@@ -72,7 +75,7 @@ class OpacityAccount {
     final String hashedFolderKey = returnValues['hashedFolderKey'];
     final String keyString = returnValues['keyString'];
 
-    await getFolderMetadataRequest(hashedFolderKey, keyString);
+    return await getFolderMetadataRequest(hashedFolderKey, keyString);
   }
 
   Map<String, String> createMetadataKeyAndString(String folder) {
@@ -86,15 +89,16 @@ class OpacityAccount {
   dynamic getFolderMetadataRequest(
       String hashedFolderKey, String keyString) async {
     final Map rawPayload = {
-      'timestamp': DateTime.now().millisecondsSinceEpoch,
-      // 'timestamp': 0,
+      'timestamp': timestamp++,
       'metadataKey': hashedFolderKey
     };
+    print(rawPayload['timestamp']);
     final String rawPayloadJson = JsonEncoder().convert(rawPayload);
     final Map payload = signPayload(rawPayloadJson);
     final String payloadJson = JsonEncoder().convert(payload);
 
-    var response = await http.post(baseUrl + 'metadata/get', body: payloadJson);
+    var response = await http.post(baseUrl + 'metadata/get',
+        body: payloadJson, headers: {'Content-Type': 'application/json'});
 
     var encryptedMetadataString =
         JsonDecoder().convert(response.body)['metadata'];
@@ -102,6 +106,9 @@ class OpacityAccount {
         base64.decode(encryptedMetadataString);
 
     var decrypted = await Utils.decrypt(encryptedMetadataBytes, keyString);
+    var metadata = JsonDecoder().convert(decrypted);
+
+    return metadata;
   }
 }
 
@@ -109,5 +116,8 @@ void main() async {
   final OpacityAccount account = OpacityAccount(
       'c18dee8900ef65150cc0f5cc931c4a241dc6e02dc60f0edac22fc16ff629d9676091fd781d82eccc747fc32e835c581d14990f2f9c3f271ec35fb5b35c6124ba');
 
-  await account.getFolderMetadata('/');
+  for (var i = 0; i < 1000; i++) {
+    final data = await account.getFolderMetadata('/');
+    print(data);
+  }
 }

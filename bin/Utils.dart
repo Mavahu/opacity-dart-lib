@@ -3,8 +3,8 @@ import 'dart:convert';
 
 import 'package:bip32/bip32.dart' as bip32;
 import 'package:convert/convert.dart' as convert;
+import 'package:cryptography/cryptography.dart' as cryptography;
 import 'package:pointycastle/digests/keccak.dart';
-import 'package:pointycastle/export.dart';
 
 bip32.BIP32 getFolderHDKey(bip32.BIP32 key, String folder) {
   return generateSubHDKey(key, 'folder: ' + folder);
@@ -49,18 +49,24 @@ String generateFolderKeyString(bip32.BIP32 folderKey) {
   // final data = convert.hex.encode(eth.keccak256(convert.hex.encode(folderKey.privateKey)));
 }
 
-void decrypt(Uint8List encryptedData, String keyString) async {
-  final Uint8List rawData = encryptedData.sublist(0, encryptedData.length - 32);
-  final Uint8List authTag =
-      encryptedData.sublist(rawData.length, rawData.length + 16);
-  final Uint8List iv = encryptedData.sublist(authTag.length + rawData.length);
+Future<String> decrypt(Uint8List encryptedData, String keyString) async {
+  // [rawData + MAC]
+  final Uint8List rawData = encryptedData.sublist(0, encryptedData.length - 16);
+  final Uint8List iv = encryptedData.sublist(rawData.length);
 
   final Uint8List key = Uint8List.fromList(convert.hex.decode(keyString));
 
-  final params = AEADParameters(KeyParameter(key), 16 * 8, iv, Uint8List(0));
-  throw ('Not functioanl');
-  final decrypter = GCMBlockCipher(AESFastEngine())..init(false, params);
-  final decrypted = decrypter.process(rawData);
+  final decrypted = await cryptography.AesGcm().decrypt(rawData,
+      secretKey: cryptography.SecretKey(key), nonce: cryptography.Nonce(iv));
+  /*
+  //throw ('Not functioanl');
+  final params =
+      AEADParameters(KeyParameter(key), 16 * 8, iv, Uint8List.fromList([]));
+  final GCMBlockCipher decrypter = GCMBlockCipher(AESFastEngine())
+    ..init(false, params);
+  final Uint8List decrypted = decrypter.process(rawData);
+  */
 
-  print(decrypted);
+  final text = Utf8Decoder().convert(decrypted);
+  return text;
 }
