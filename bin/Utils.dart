@@ -6,13 +6,14 @@ import 'package:convert/convert.dart' as convert;
 import 'package:cryptography/cryptography.dart' as cryptography;
 import 'package:pointycastle/digests/keccak.dart';
 
+import './models/Constants.dart' show Constants;
+import './models/FileMetadata.dart' show FileMetaoptions;
+
 bip32.BIP32 getFolderHDKey(bip32.BIP32 key, String folder) {
   return generateSubHDKey(key, 'folder: ' + folder);
 }
 
 bip32.BIP32 generateSubHDKey(bip32.BIP32 key, String path) {
-  // old way using ethereum_util lib
-  // - final String hashedPath = convert.hex.encode(eth.keccak256(path));
   final String hashedPath =
       convert.hex.encode(KeccakDigest(256).process(utf8.encode(path)));
   final String bipPath = hashToPath(hashedPath);
@@ -33,40 +34,53 @@ String generateHashedFolderKey(bip32.BIP32 folderKey) {
   final String keccak256AsHex = convert.hex.encode(KeccakDigest(256)
       .process(utf8.encode(convert.hex.encode(folderKey.publicKey))));
   return keccak256AsHex;
-  /*
-  - old way using ethereum_utils library:
-  final data = convert.hex
-      .encode(eth.keccak256(convert.hex.encode(folderKey.publicKey)));
-   */
 }
 
 String generateFolderKeyString(bip32.BIP32 folderKey) {
   final String keccak256AsHex = convert.hex.encode(KeccakDigest(256)
       .process(utf8.encode(convert.hex.encode(folderKey.privateKey))));
   return keccak256AsHex;
-
-  // old way using ethereum_utils library
-  // final data = convert.hex.encode(eth.keccak256(convert.hex.encode(folderKey.privateKey)));
 }
 
 Future<String> decrypt(Uint8List encryptedData, String keyString) async {
   // [rawData + MAC]
-  final Uint8List rawData = encryptedData.sublist(0, encryptedData.length - 16);
+
+  final Uint8List rawData =
+      encryptedData.sublist(0, encryptedData.length - Constants.IV_BYTE_LENGTH);
   final Uint8List iv = encryptedData.sublist(rawData.length);
 
   final Uint8List key = Uint8List.fromList(convert.hex.decode(keyString));
 
-  final decrypted = await cryptography.AesGcm().decrypt(rawData,
+  final Uint8List decrypted = await cryptography.AesGcm().decrypt(rawData,
       secretKey: cryptography.SecretKey(key), nonce: cryptography.Nonce(iv));
-  /*
-  //throw ('Not functioanl');
-  final params =
-      AEADParameters(KeyParameter(key), 16 * 8, iv, Uint8List.fromList([]));
-  final GCMBlockCipher decrypter = GCMBlockCipher(AESFastEngine())
-    ..init(false, params);
-  final Uint8List decrypted = decrypter.process(rawData);
-  */
 
   final text = Utf8Decoder().convert(decrypted);
   return text;
+}
+
+Future encrypt(Uint8List rawData, String keyString) async {
+  final cryptography.Nonce iv =
+      cryptography.Nonce.randomBytes(Constants.IV_BYTE_LENGTH);
+
+  /*
+  final Uint8List encrypted = await cryptography.AesGcm().encrypt(decrypted,
+      secretKey: cryptography.SecretKey(key), nonce: cryptography.Nonce(iv));
+      */
+}
+
+int getUploadSize(int fileSize) {
+  final int blockSize = Constants.DEFAULT_BLOCK_SIZE;
+  final int blockCount = (fileSize / blockSize).ceil();
+  return fileSize + (blockCount * Constants.BLOCK_OVERHEAD);
+}
+
+int getEndIndex(int uploadSize, FileMetaoptions fileMetaoptions) {
+  final int blockSize = fileMetaoptions.blockSize;
+  final int partSize = fileMetaoptions.partSize;
+  final int chunkSize = blockSize + Constants.BLOCK_OVERHEAD;
+  final int chunkCount = (uploadSize / chunkSize).ceil();
+  final int chunksPerPart = (partSize / chunkSize).ceil();
+  // theoretically: endIndex = (uploadSize/partSize).ceil()
+  final int endIndex = (chunkCount / chunksPerPart).ceil();
+  return endIndex;
 }
