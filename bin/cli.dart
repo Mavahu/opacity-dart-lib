@@ -9,6 +9,7 @@ import 'package:pointycastle/export.dart';
 import 'package:pointycastle/src/utils.dart';
 
 import 'Utils.dart' as Utils;
+import './models/FolderMetadata.dart' show FolderMetadata;
 
 class OpacityAccount {
   String baseUrl = 'https://broker-1.opacitynodes.com:3000/api/v1/';
@@ -16,7 +17,6 @@ class OpacityAccount {
   String privateKey;
   String chainCode;
   bip32.BIP32 masterKey;
-  int timestamp = 1607012726974;
 
   OpacityAccount(String handle) {
     this.handle = handle;
@@ -70,7 +70,7 @@ class OpacityAccount {
     };
   }
 
-  dynamic getFolderMetadata(String folder) async {
+  Future<FolderMetadata> getFolderMetadata(String folder) async {
     final Map returnValues = createMetadataKeyAndString(folder);
     final String hashedFolderKey = returnValues['hashedFolderKey'];
     final String keyString = returnValues['keyString'];
@@ -86,27 +86,29 @@ class OpacityAccount {
     return {'hashedFolderKey': hashedFolderKey, 'keyString': keyString};
   }
 
-  dynamic getFolderMetadataRequest(
+  Future<FolderMetadata> getFolderMetadataRequest(
       String hashedFolderKey, String keyString) async {
     final Map rawPayload = {
-      'timestamp': timestamp++,
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
       'metadataKey': hashedFolderKey
     };
-    print(rawPayload['timestamp']);
+
     final String rawPayloadJson = JsonEncoder().convert(rawPayload);
     final Map payload = signPayload(rawPayloadJson);
     final String payloadJson = JsonEncoder().convert(payload);
 
-    var response = await http.post(baseUrl + 'metadata/get',
+    final response = await http.post(baseUrl + 'metadata/get',
         body: payloadJson, headers: {'Content-Type': 'application/json'});
 
-    var encryptedMetadataString =
+    final encryptedMetadataString =
         JsonDecoder().convert(response.body)['metadata'];
     final Uint8List encryptedMetadataBytes =
         base64.decode(encryptedMetadataString);
 
-    var decrypted = await Utils.decrypt(encryptedMetadataBytes, keyString);
-    var metadata = JsonDecoder().convert(decrypted);
+    final decrypted = await Utils.decrypt(encryptedMetadataBytes, keyString);
+    final metadataAsList = JsonDecoder().convert(decrypted);
+
+    final metadata = FolderMetadata.toObject(metadataAsList);
 
     return metadata;
   }
