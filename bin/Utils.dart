@@ -58,14 +58,17 @@ Future<String> decrypt(Uint8List encryptedData, String keyString) async {
   return text;
 }
 
-Future encrypt(Uint8List rawData, String keyString) async {
+Future encrypt(String rawData, Uint8List key) async {
   final cryptography.Nonce iv =
       cryptography.Nonce.randomBytes(Constants.IV_BYTE_LENGTH);
 
-  /*
-  final Uint8List encrypted = await cryptography.AesGcm().encrypt(decrypted,
-      secretKey: cryptography.SecretKey(key), nonce: cryptography.Nonce(iv));
-      */
+  final Uint8List encrypted = await cryptography.aesGcm.encrypt(
+      utf8.encode(rawData),
+      secretKey: cryptography.SecretKey(key),
+      nonce: iv);
+
+  final List<int> result = encrypted + iv.bytes;
+  return result;
 }
 
 int getUploadSize(int fileSize) {

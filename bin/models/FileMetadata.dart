@@ -16,6 +16,16 @@ class FileMetadata {
 
     return fileMetadata;
   }
+
+  Map toJson() {
+    final jsonObject = {
+      'name': this.name,
+      'type': this.type,
+      'size': this.size,
+      'p': {'blockSize': this.p.blockSize, 'partSize': this.p.partSize}
+    };
+    return jsonObject;
+  }
 }
 
 class FileMetaoptions {

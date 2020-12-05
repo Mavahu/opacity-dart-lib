@@ -7,8 +7,9 @@ import 'package:convert/convert.dart' as convert;
 import 'package:http/http.dart' as http;
 import 'package:pointycastle/digests/keccak.dart';
 import 'package:pointycastle/export.dart';
-import 'package:pointycastle/src/utils.dart';
+import 'package:pointycastle/src/utils.dart' show encodeBigInt, decodeBigInt;
 import 'package:path/path.dart' as pth;
+import 'package:cryptography/cryptography.dart' as cryptography;
 
 import 'Utils.dart' as Utils;
 import './models/FolderMetadata.dart' show FolderMetadata, FolderMetadataFile;
@@ -44,7 +45,7 @@ class OpacityAccount {
     final ECSignature signatureObject =
         signer2.generateSignature(convert.hex.decode(payloadHash));
 
-    // // r + s => signature
+    // r + s => signature
     final String signature =
         convert.hex.encode(encodeBigInt(signatureObject.r, 32)) +
             convert.hex.encode(encodeBigInt(signatureObject.s, 32));
@@ -54,6 +55,36 @@ class OpacityAccount {
 
     return {
       'requestBody': payload,
+      'signature': signature,
+      'publicKey': convert.hex.encode(masterKey.publicKey),
+      'hash': payloadHash
+    };
+  }
+
+  Map<String, String> signPayloadForm(String rawPayload) {
+    final String payloadHash =
+        convert.hex.encode(KeccakDigest(256).process(utf8.encode(rawPayload)));
+
+    // https://pub.dev/documentation/ethereum_util/latest/ethereum_util/sign.html
+    final ECDSASigner signer = ECDSASigner(null, HMac(SHA256Digest(), 64));
+    final NormalizedECDSASigner signer2 =
+        NormalizedECDSASigner(signer, enforceNormalized: true);
+    final ECPrivateKey key = ECPrivateKey(
+        decodeBigInt(masterKey.privateKey), ECDomainParameters('secp256k1'));
+    signer2.init(true, PrivateKeyParameter(key));
+    final ECSignature signatureObject =
+        signer2.generateSignature(convert.hex.decode(payloadHash));
+
+    // r + s => signature
+    final String signature =
+        convert.hex.encode(encodeBigInt(signatureObject.r, 32)) +
+            convert.hex.encode(encodeBigInt(signatureObject.s, 32));
+    if (signature.length != 128) {
+      throw ('Signature has an invalid length');
+    }
+
+    return {
+      'requestBody': rawPayload,
       'signature': signature,
       'publicKey': convert.hex.encode(masterKey.publicKey),
       'hash': payloadHash
@@ -126,6 +157,36 @@ class OpacityAccount {
     final FileMetadata fileMetadata = FileMetadata.toObject(fileData);
     final int uploadSize = Utils.getUploadSize(fileMetadata.size);
     final int endIndex = Utils.getEndIndex(uploadSize, fileMetadata.p);
+
+    final Uint8List handle = cryptography.Nonce.randomBytes(64).bytes;
+    final Uint8List keyBytes = handle.sublist(32);
+
+    final String fileMetadataAsString =
+        JsonEncoder().convert(fileMetadata.toJson());
+    final encryptedFileMetadataBytes =
+        await Utils.encrypt(fileMetadataAsString, keyBytes);
+
+    final String handleHex = convert.hex.encode(handle);
+    final String fileId = handleHex.substring(0, 64);
+
+    final Map<String, dynamic> requestBody = {
+      'fileHandle': fileId,
+      'fileSizeInByte': uploadSize,
+      'endIndex': endIndex
+    };
+
+    final String requestBodyAsString = jsonEncode(requestBody);
+    final Map<String, String> form = this.signPayloadForm(requestBodyAsString);
+
+    var request =
+        http.MultipartRequest('POST', Uri.parse(this.baseUrl + 'init-upload'))
+          ..fields.addAll(form);
+    var response = await request.send();
+    if (response.statusCode != 200) {
+      throw ('Failed to initiate file upload');
+    }
+
+    print("");
   }
 }
 
