@@ -1,5 +1,7 @@
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:convert';
+import 'dart:io' as io;
 
 import 'package:bip32/bip32.dart' as bip32;
 import 'package:convert/convert.dart' as convert;
@@ -58,16 +60,14 @@ Future<String> decrypt(Uint8List encryptedData, String keyString) async {
   return text;
 }
 
-Future encrypt(String rawData, Uint8List key) async {
+Future<Uint8List> encrypt(Uint8List rawData, Uint8List key) async {
   final cryptography.Nonce iv =
       cryptography.Nonce.randomBytes(Constants.IV_BYTE_LENGTH);
 
-  final Uint8List encrypted = await cryptography.aesGcm.encrypt(
-      utf8.encode(rawData),
-      secretKey: cryptography.SecretKey(key),
-      nonce: iv);
+  final Uint8List encrypted = await cryptography.aesGcm
+      .encrypt(rawData, secretKey: cryptography.SecretKey(key), nonce: iv);
 
-  final List<int> result = encrypted + iv.bytes;
+  final Uint8List result = Uint8List.fromList(encrypted + iv.bytes);
   return result;
 }
 
@@ -86,4 +86,17 @@ int getEndIndex(int uploadSize, FileMetaoptions fileMetaoptions) {
   // theoretically: endIndex = (uploadSize/partSize).ceil()
   final int endIndex = (chunkCount / chunksPerPart).ceil();
   return endIndex;
+}
+
+Future<Uint8List> getPartial(
+    Map fileInfo, int partSize, int currentIndex) async {
+  final int remainingSize = fileInfo['size'] - (partSize * currentIndex);
+  final int uploadSize = math.min(partSize, remainingSize);
+
+  var file = await io.File(fileInfo['path']).open();
+  await file.setPosition(partSize * currentIndex);
+  final Uint8List fileChunk = await file.read(uploadSize);
+  await file.close();
+
+  return fileChunk;
 }
