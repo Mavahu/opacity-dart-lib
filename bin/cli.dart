@@ -11,6 +11,7 @@ import 'package:pointycastle/export.dart';
 import 'package:pointycastle/src/utils.dart' show encodeBigInt, decodeBigInt;
 import 'package:path/path.dart' as pth;
 import 'package:cryptography/cryptography.dart' as cryptography;
+import 'package:semaphore/semaphore.dart' as semaphore;
 
 import 'Utils.dart' as Utils;
 import './models/FolderMetadata.dart'
@@ -23,6 +24,7 @@ class OpacityAccount {
   String privateKey;
   String chainCode;
   bip32.BIP32 masterKey;
+  int maxSimultaneousPartsUpload;
 
   OpacityAccount(String handle) {
     this.handle = handle;
@@ -31,6 +33,7 @@ class OpacityAccount {
     masterKey = bip32.BIP32.fromPrivateKey(
         Uint8List.fromList(convert.hex.decode(privateKey)),
         Uint8List.fromList(convert.hex.decode(chainCode)));
+    this.maxSimultaneousPartsUpload = 5;
   }
 
   Map<String, String> signPayload(String payload) {
@@ -110,7 +113,7 @@ class OpacityAccount {
     final String fileName = pth.basename(filePath);
     final io.File file = io.File(filePath);
     final fileStats = file.statSync();
-    final int fileSize = await file.length();
+    final int fileSize = fileStats.size;
     final Map<String, dynamic> fileData = {
       'path': filePath,
       'name': fileName,
@@ -126,6 +129,8 @@ class OpacityAccount {
         return;
       }
     }
+
+    print('$fileName: Starting upload');
 
     final FileMetadata fileMetadata = FileMetadata.toObject(fileData);
     final int uploadSize = Utils.getUploadSize(fileMetadata.size);
@@ -162,13 +167,65 @@ class OpacityAccount {
       throw ('Failed to initiate file upload');
     }
 
+    print('$fileName: Initiated upload');
+
+    // Upload all parts of the file
+
+    final sm = semaphore.LocalSemaphore(this.maxSimultaneousPartsUpload);
+    final List<Future> futures = <Future>[];
     for (int partIndex = 0; partIndex < endIndex; partIndex++) {
+      futures.add(this.uploadFilePart(
+          partIndex, endIndex, fileData, fileMetadata, keyBytes, fileId, sm));
+    }
+    await Future.wait(futures);
+    print('$fileName: Uploaded all parts');
+
+    //verify upload & retry -> implement later
+    /*
+    final verifyBody = {'fileHandle': fileId};
+    final verifyBodyString = json.encode(verifyBody);
+    final payload = this.signPayload(verifyBodyString);
+    final payloadString = json.encode(payload);
+
+    final resp =
+        await http.post(baseUrl + 'upload-status', body: payloadString);
+    */
+
+    //Append Metadata
+
+    final FolderMetadataFile folderMetadataFile = FolderMetadataFile(
+        fileMetadata.name,
+        fileStats.modified.millisecondsSinceEpoch,
+        fileStats.modified.millisecondsSinceEpoch);
+    folderMetadataFile.versions.add(FolderMetadataFileVersion(
+        handleHex,
+        fileMetadata.size,
+        fileStats.modified.millisecondsSinceEpoch,
+        fileStats.modified.millisecondsSinceEpoch));
+
+    final FolderMetadata metadata = await this.getFolderMetadata(folder);
+    metadata.files.add(folderMetadataFile);
+    await this.setMetadata(metadata);
+    print('$fileName: Finished upload');
+  }
+
+  Future uploadFilePart(
+      int partIndex,
+      int endIndex,
+      Map fileData,
+      FileMetadata fileMetadata,
+      Uint8List keyBytes,
+      String fileId,
+      semaphore.LocalSemaphore localSemaphore) async {
+    try {
+      await localSemaphore.acquire();
+      print('${fileData['name']}: Uploading part ${partIndex + 1} / $endIndex');
+
       final Uint8List rawPart =
           await Utils.getPartial(fileData, fileMetadata.p.partSize, partIndex);
       final int chunksTotalAmount =
           (rawPart.length / fileMetadata.p.blockSize).ceil();
       List<int> encryptedChunks = [];
-
       // move the chunk encryption in its own function
       for (int chunkIndex = 0; chunkIndex < chunksTotalAmount; chunkIndex++) {
         final int remaining =
@@ -199,38 +256,12 @@ class OpacityAccount {
                 'chunkData', encryptedChunks,
                 filename: 'chunkData'));
       var response = await request.send();
-      print('t');
       if (response.statusCode != 200) {
         throw ('Failed to upload part ${partIndex + 1}/$endIndex of ${fileMetadata.name}');
       }
+    } finally {
+      localSemaphore.release();
     }
-
-    //verify upload & retry -> implement later
-    final verifyBody = {'fileHandle': fileId};
-    final verifyBodyString = json.encode(verifyBody);
-    final payload = this.signPayload(verifyBodyString);
-    final payloadString = json.encode(payload);
-
-    final resp =
-        await http.post(baseUrl + 'upload-status', body: payloadString);
-    print('');
-
-    //Append Metadata
-
-    final FolderMetadataFile folderMetadataFile = FolderMetadataFile(
-        fileMetadata.name,
-        fileStats.modified.millisecondsSinceEpoch,
-        fileStats.modified.millisecondsSinceEpoch);
-    folderMetadataFile.versions.add(FolderMetadataFileVersion(
-        handleHex,
-        fileMetadata.size,
-        fileStats.modified.millisecondsSinceEpoch,
-        fileStats.modified.millisecondsSinceEpoch));
-
-    final FolderMetadata metadata = await this.getFolderMetadata(folder);
-    metadata.files.add(folderMetadataFile);
-    await this.setMetadata(metadata);
-    print('');
   }
 
   Future setMetadata(FolderMetadata metadata) async {
@@ -270,5 +301,6 @@ void main() async {
       'c18dee8900ef65150cc0f5cc931c4a241dc6e02dc60f0edac22fc16ff629d9676091fd781d82eccc747fc32e835c581d14990f2f9c3f271ec35fb5b35c6124ba');
 
   final ret = await account.uploadFile(
-      '/', r"C:\Users\Martin\Downloads\Mikrowelle.jpg");
+      '/', r"C:\Users\Martin\Downloads\ed026f6cf236865d65ce8d69b4eeba82.mp4");
+  return;
 }
